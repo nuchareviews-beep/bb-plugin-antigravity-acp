@@ -77,7 +77,8 @@ let threadCounter = 0;
 let turnCounter = 0;
 /** Our own threadId -> agy's own conversation_id, once known. */
 const agyConversationByThread = new Map<string, string>();
-const sessions = new Map<string, string>();
+/** threadId -> { providerThreadId, model } — model is frozen at thread construction. */
+const sessions = new Map<string, { providerThreadId: string; model: string }>();
 
 type JsonRpcId = string | number;
 
@@ -122,14 +123,14 @@ function homeDir(): string {
   return process.env.HOME ?? process.env.USERPROFILE ?? "/root";
 }
 
-function appendUsageLog(config: AntigravityConfig, usage: Record<string, unknown> | undefined): void {
+function appendUsageLog(model: string, usage: Record<string, unknown> | undefined): void {
   if (!usage) return;
   try {
     mkdirSync(join(homeDir(), ".antigravity-acp"), { recursive: true });
     const fact = {
       created_at_ms: Date.now(),
       provider: "google",
-      model: config.model || "agy-default",
+      model: model || "agy-default",
       input_tokens: usage.input_tokens ?? 0,
       output_tokens: usage.output_tokens ?? 0,
       thinking_tokens: usage.thinking_tokens ?? 0,
@@ -142,14 +143,76 @@ function appendUsageLog(config: AntigravityConfig, usage: Record<string, unknown
   }
 }
 
+// ---------------------------------------------------------------------------
+// Live model catalog: `agy models` prints one tab-separated "id\tdisplay
+// name" line per model (no JSON output mode for this subcommand).
+// ---------------------------------------------------------------------------
+
+interface AgyModel {
+  id: string;
+  model: string;
+  displayName: string;
+  description: string;
+  supportedReasoningEfforts: { reasoningEffort: "low" | "medium" | "high"; description: string }[];
+  defaultReasoningEffort: "low" | "medium" | "high";
+  isDefault: boolean;
+}
+
+let modelCache: { at: number; models: AgyModel[] } | null = null;
+const MODEL_CACHE_TTL_MS = 5 * 60_000;
+
+async function fetchAgyModels(config: AntigravityConfig): Promise<AgyModel[]> {
+  if (modelCache && Date.now() - modelCache.at < MODEL_CACHE_TTL_MS) return modelCache.models;
+  try {
+    const { stdout } = await execFileAsync(config.agyBin, ["models"], {
+      maxBuffer: 4 * 1024 * 1024,
+      timeout: 30_000,
+    });
+    const models: AgyModel[] = stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && line.includes("\t"))
+      .map((line) => {
+        const [id, displayName] = line.split("\t");
+        return {
+          id: id!,
+          model: id!,
+          displayName: displayName || id!,
+          description: `Antigravity model available through the local agy CLI.`,
+          supportedReasoningEfforts: [
+            { reasoningEffort: "low", description: "Low" },
+            { reasoningEffort: "medium", description: "Medium" },
+            { reasoningEffort: "high", description: "High" },
+          ],
+          defaultReasoningEffort: "medium",
+          isDefault: id === config.model,
+        };
+      });
+    if (models.length > 0 && !models.some((m) => m.isDefault)) models[0]!.isDefault = true;
+    modelCache = { at: Date.now(), models };
+    return models;
+  } catch {
+    return modelCache?.models ?? [];
+  }
+}
+
 async function callAgy(
   threadId: string,
+  model: string,
   prompt: string,
 ): Promise<AgyResult | { error: string }> {
   const config = loadConfig();
   const existingConversationId = agyConversationByThread.get(threadId);
-  const args = ["-p", prompt, "--output-format", "json", "--effort", config.effort];
-  if (config.model) args.push("--model", config.model);
+  const args = ["-p", prompt, "--output-format", "json"];
+  if (model) {
+    // agy's own model ids already encode an effort level (e.g.
+    // "gemini-3.5-flash-low"), so --model and --effort together are a
+    // hard conflict agy itself rejects ("--model X conflicts with
+    // --effort=Y"). Let the model id govern effort when one is picked.
+    args.push("--model", model);
+  } else {
+    args.push("--effort", config.effort);
+  }
   if (existingConversationId) args.push("--conversation", existingConversationId);
   try {
     const { stdout } = await execFileAsync(config.agyBin, args, {
@@ -166,7 +229,7 @@ async function callAgy(
     if (parsed.status && parsed.status !== "SUCCESS") {
       return { error: parsed.error ?? `agy returned status ${parsed.status}` };
     }
-    appendUsageLog(config, parsed.usage);
+    appendUsageLog(model, parsed.usage);
     return { response: parsed.response ?? "", conversationId: parsed.conversation_id ?? null };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -176,6 +239,7 @@ async function callAgy(
 async function runTurn(args: {
   threadId: string;
   providerThreadId: string;
+  model: string;
   input: readonly PromptInput[];
   clientRequestId?: string;
 }): Promise<void> {
@@ -204,7 +268,7 @@ async function runTurn(args: {
     scope,
   });
 
-  const result = await callAgy(args.threadId, promptText(args.input));
+  const result = await callAgy(args.threadId, args.model, promptText(args.input));
   let text: string;
   if ("error" in result) {
     text = `Antigravity (agy) request failed: ${result.error}`;
@@ -256,26 +320,9 @@ const handlers: Record<string, RequestHandler> = {
       invalidParams(id, BRIDGE_REQUEST_METHODS.modelList, parsed.error.issues);
       return;
     }
-    // agy resolves its own model internally (config.model overrides it); a
-    // single default entry lets bb resolve a default model without the user
-    // passing --model explicitly on every spawn.
-    respondResult(id, {
-      models: [
-        {
-          id: "default",
-          model: "default",
-          displayName: "Antigravity (agy default)",
-          description: "Uses agy's own configured default model.",
-          supportedReasoningEfforts: [
-            { reasoningEffort: "low", description: "Low" },
-            { reasoningEffort: "medium", description: "Medium" },
-            { reasoningEffort: "high", description: "High" },
-          ],
-          defaultReasoningEffort: "medium",
-          isDefault: true,
-        },
-      ],
-      selectedOnlyModels: [],
+    const config = loadConfig();
+    void fetchAgyModels(config).then((models) => {
+      respondResult(id, { models, selectedOnlyModels: [] });
     });
   },
 
@@ -287,14 +334,16 @@ const handlers: Record<string, RequestHandler> = {
     }
     threadCounter += 1;
     const providerThreadId = `agy_${instanceNonce}_${threadCounter}`;
-    sessions.set(parsed.data.threadId, providerThreadId);
+    const config = loadConfig();
+    const model = parsed.data.options?.model || config.model;
+    sessions.set(parsed.data.threadId, { providerThreadId, model });
     notify(BRIDGE_NOTIFICATION_METHODS.threadIdentity, {
       threadId: parsed.data.threadId,
       providerThreadId,
     });
     respondResult(id, { providerThreadId });
     if (parsed.data.input !== undefined && parsed.data.input.length > 0) {
-      void runTurn({ threadId: parsed.data.threadId, providerThreadId, input: parsed.data.input });
+      void runTurn({ threadId: parsed.data.threadId, providerThreadId, model, input: parsed.data.input });
     }
   },
 
@@ -307,7 +356,9 @@ const handlers: Record<string, RequestHandler> = {
     // See the file-level note: the underlying agy conversation id is not
     // recoverable across a bridge process restart, so resume re-adopts our
     // own providerThreadId but starts a fresh agy conversation on next turn.
-    sessions.set(parsed.data.threadId, parsed.data.providerThreadId);
+    const config = loadConfig();
+    const model = parsed.data.options?.model || config.model;
+    sessions.set(parsed.data.threadId, { providerThreadId: parsed.data.providerThreadId, model });
     notify(BRIDGE_NOTIFICATION_METHODS.threadIdentity, {
       threadId: parsed.data.threadId,
       providerThreadId: parsed.data.providerThreadId,
@@ -322,9 +373,13 @@ const handlers: Record<string, RequestHandler> = {
       return;
     }
     respondResult(id, {});
+    const session = sessions.get(parsed.data.threadId);
+    const config = loadConfig();
+    const model = parsed.data.options?.model || session?.model || config.model;
     void runTurn({
       threadId: parsed.data.threadId,
       providerThreadId: parsed.data.providerThreadId,
+      model,
       input: parsed.data.input,
       clientRequestId: parsed.data.clientRequestId,
     });

@@ -15,7 +15,12 @@ export default async function plugin(bb: BbPluginApi) {
   const settings = bb.settings.define({
     agyBin: { type: "string", label: "agy binary path", default: "agy" },
     model: { type: "string", label: "Model override (blank = agy default)", default: "" },
-    effort: { type: "select", label: "Reasoning effort", options: ["low", "medium", "high"], default: "medium" },
+    effort: {
+      type: "select",
+      label: "Reasoning effort (only used when no specific model is picked — agy's own model ids already encode effort, e.g. gemini-3.5-flash-low)",
+      options: ["low", "medium", "high"],
+      default: "medium",
+    },
   });
 
   const hostClient = bb.hosts.experimental_client({ contract: antigravityHostContract });
@@ -53,7 +58,7 @@ export default async function plugin(bb: BbPluginApi) {
   bb.agents.experimental_registerProvider({
     id: "antigravity",
     displayName: "Antigravity",
-    icon: "Zap",
+    icon: "Orbit",
     capabilities: {
       supportsServiceTier: false,
       supportsNativeUserQuestion: false,
