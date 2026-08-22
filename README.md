@@ -1,83 +1,38 @@
 # bb-plugin-antigravity-acp
 
-A BB plugin.
+Bridges BB to the local [Antigravity](https://antigravity.google/) CLI (`agy`) and registers it as a BB agent provider.
 
-## Manifest
+## What it does
 
-`package.json` is the plugin manifest. Notable fields:
+- Adds **Antigravity** to the BB provider picker. Threads on this provider shell out to `agy -p ... --output-format json` once per turn, using `--conversation` for best-effort session continuity across turns in the same thread.
+- Writes one JSONL line per turn to `~/.antigravity-acp/usage.jsonl` in the same `kind: "generation"` / `fact` shape [bb-plugin-usage](https://github.com/MayankBansal12/bb-plugin-usage) already reads for FX, so token counts and provider attribution flow into the usage dashboard once that plugin picks up Antigravity as a source ([PR #21](https://github.com/MayankBansal12/bb-plugin-usage/pull/21)).
 
-- `bb.server` — backend entry (required); optional `bb.app` for a frontend.
-- `bb.name` and `bb.description` — required human-facing identity.
-- `bb.branding` — required; declare `icon` as a BB icon name or a
-  plugin-relative compact SVG, or declare `logo.light` (with optional
-  `logo.dark`). Logo assets must be relative `.svg`, `.png`, or
-  `.webp` files.
-- `engines.bb` — supported bb app version range.
-- `engines.bbPluginSdk` — the lowest plugin SDK you need (scaffold:
-  `>=0.4.8`). BB reads this as a floor, not a ceiling: a later
-  SDK in the same major still loads your plugin.
-- `dependencies` — every package your source imports that BB does not provide.
-  `bb plugin build` inlines them into `dist/`, and git installs resolve this
-  list alone, so a build-required package here rather than in
-  `devDependencies` is what keeps your plugin installable. `devDependencies`
-  is for types and tooling only (BB shims React, the portal primitives, and
-  `@get-bb/plugin-sdk` at runtime — never bundle them).
+## Requirements
 
-Run `bb plugin build` before publishing git/npm installs. It writes
-`dist/server.js` + `server.meta.json` (and, with `bb.app`, `app.js` /
-`app.css` / `app.meta.json`). Each `*.meta.json` stamps SDK major/version,
-`artifactFormatVersion`, `pluginId`, `pluginVersion`, and
-`builtWith` so managed installs can verify the artifacts.
+- The Antigravity CLI on `PATH` as `agy` (install: `curl -fsSL https://antigravity.google/cli/install.sh | bash`).
+- An authenticated `agy` session (`agy` handles its own OAuth on first run).
 
 ## Install
 
-From this directory (`bb plugin new` already ran the install; a fresh clone
-needs it):
-
-```
-npm install
-bb plugin install .
+```sh
+bb plugin install git:https://github.com/nuchareviews-beep/bb-plugin-antigravity-acp.git@^0.1.0
 ```
 
-After editing sources, reload:
+## Settings
 
-```
-bb plugin reload antigravity-acp
-```
+- `agyBin` (default `agy`) — path to the Antigravity CLI binary
+- `model` (default empty) — model override; empty means agy's own default
+- `effort` (default `medium`) — reasoning effort: `low`, `medium`, or `high`
 
-## Configure
+## Scope and limitations
 
-```
-bb plugin config antigravity-acp
-bb plugin config antigravity-acp set greeting hi
-```
+- Single-shot, non-streaming turns (one `agy -p` invocation per `turn/start`, no mid-turn tool calls, no steer).
+- Thread → agy conversation-id mapping is **in-memory only**. If the bridge process is recycled (idle eviction, reload, crash) that mapping is lost, and the next turn on a previously-resumed thread starts a fresh agy conversation rather than truly continuing the old one.
 
-## Types & API reference
+## Related
 
-The plugin API ships as the npm package `@get-bb/plugin-sdk`, pinned to an
-exact version in `devDependencies` (`0.4.8` — the SDK of the BB
-that scaffolded this plugin). After `npm install`, the full surface is on disk
-at:
+- [bb-plugin-omniroute-acp](https://github.com/nuchareviews-beep/bb-plugin-omniroute-acp) — sibling plugin bridging BB to a local OmniRoute instance.
 
-```
-node_modules/@get-bb/plugin-sdk/bundled-types/bb-plugin-sdk.d.ts      # backend
-node_modules/@get-bb/plugin-sdk/bundled-types/bb-plugin-sdk-app.d.ts  # frontend
-```
+## License
 
-Your editor and `tsc` resolve `@get-bb/plugin-sdk` there through ordinary node
-resolution — no path mapping. These are readable declarations: open them for an
-exact signature.
-
-The SDK surface grows with every BB release, so the pin has to track the BB you
-actually run:
-
-```
-bb plugin types          # sync this plugin's SDK surface to the running BB
-bb plugin types --check  # CI: fail when it does not match
-```
-
-Ask BB to write plugins for you: the `bb-plugin-authoring` skill documents
-the whole surface with examples.
-
-Confused by the API, or need something the types don't explain? Clone the BB
-repo and read the source: <https://github.com/get-bb/bb>.
+[MIT](LICENSE)
