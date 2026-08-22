@@ -1,0 +1,27 @@
+{
+  "name": "bb-plugin-antigravity-acp",
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "bb": ">=0.39",
+    "bbPluginSdk": ">=0.4.8"
+  },
+  "bb": {
+    "name": "Antigravity",
+    "description": "Bridges BB to the local Antigravity CLI (agy): registers it as an agent provider by shelling out to `agy -p ... --output-format json`, with session continuity via agy's --conversation flag.",
+    "branding": {
+      "icon": "Zap"
+    },
+    "server": "./server.ts",
+    "host": "./host.ts"
+  },
+  "dependencies": {
+    "zod": "^4.3.6",
+    "@get-bb/plugin-sdk": "0.4.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}
