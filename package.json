@@ -10,7 +10,8 @@
     "name": "Antigravity",
     "description": "Bridges BB to the local Antigravity CLI (agy): registers it as an agent provider by shelling out to `agy -p ... --output-format json`, with session continuity via agy's --conversation flag.",
     "branding": {
-      "icon": "Orbit"
+      "icon": "Orbit",
+      "logo": { "light": "./assets/icon.png" }
     },
     "server": "./server.ts",
     "host": "./host.ts"

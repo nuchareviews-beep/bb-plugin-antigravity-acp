@@ -58,7 +58,7 @@ export default async function plugin(bb: BbPluginApi) {
   bb.agents.experimental_registerProvider({
     id: "antigravity",
     displayName: "Antigravity",
-    icon: "Orbit",
+    icon: "./assets/icon.png",
     capabilities: {
       supportsServiceTier: false,
       supportsNativeUserQuestion: false,

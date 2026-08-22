@@ -37,11 +37,38 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { antigravityHostContract } from "./contract.js";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * `agy models` (no -p flag) hangs indefinitely reading stdin when spawned
+ * with execFile's default stdio (an open, never-closed pipe) — confirmed by
+ * reproducing it standalone outside the plugin. `agy -p ...` doesn't hit
+ * this (the prompt arg makes it non-interactive on its own), so only the
+ * model-list path needs this: stdin explicitly closed via spawn.
+ */
+function runAgyNoStdin(bin: string, args: string[], timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`${bin} ${args.join(" ")} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    child.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
+    child.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+    child.on("error", (err) => { clearTimeout(timer); reject(err); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve(stdout);
+      else reject(new Error(`${bin} ${args.join(" ")} exited ${code}: ${stderr.slice(0, 500)}`));
+    });
+  });
+}
 
 const configPath = join(tmpdir(), "bb-plugin-antigravity-acp-config.json");
 
@@ -164,10 +191,7 @@ const MODEL_CACHE_TTL_MS = 5 * 60_000;
 async function fetchAgyModels(config: AntigravityConfig): Promise<AgyModel[]> {
   if (modelCache && Date.now() - modelCache.at < MODEL_CACHE_TTL_MS) return modelCache.models;
   try {
-    const { stdout } = await execFileAsync(config.agyBin, ["models"], {
-      maxBuffer: 4 * 1024 * 1024,
-      timeout: 30_000,
-    });
+    const stdout = await runAgyNoStdin(config.agyBin, ["models"], 30_000);
     const models: AgyModel[] = stdout
       .split("\n")
       .map((line) => line.trim())
