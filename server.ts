@@ -68,7 +68,10 @@ export default async function plugin(bb: BbPluginApi) {
       supportsThreadRename: false,
       supportsWorkflows: false,
       permissionModes: ["full"],
-      reasoningLevels: ["low", "medium", "high"],
+      // agy's model ids already encode effort (gemini-3.5-flash-low/-medium/
+      // -high are distinct ids) — a single fixed value here keeps BB from
+      // rendering a second, redundant reasoning-effort picker per thread.
+      reasoningLevels: ["medium"],
     },
     composerActions: [],
   });

@@ -203,11 +203,12 @@ async function fetchAgyModels(config: AntigravityConfig): Promise<AgyModel[]> {
           model: id!,
           displayName: displayName || id!,
           description: `Antigravity model available through the local agy CLI.`,
-          supportedReasoningEfforts: [
-            { reasoningEffort: "low", description: "Low" },
-            { reasoningEffort: "medium", description: "Medium" },
-            { reasoningEffort: "high", description: "High" },
-          ],
+          // agy's own model ids already bake in an effort level (e.g.
+          // "gemini-3.5-flash-low" vs "-medium" vs "-high" are distinct
+          // ids), so a second, separate reasoning-effort picker in BB would
+          // just be confusing — pick the model id that already says what
+          // effort you want, instead of two controls for one thing.
+          supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "Standard" }],
           defaultReasoningEffort: "medium",
           isDefault: id === config.model,
         };
