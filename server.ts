@@ -17,7 +17,7 @@ export default async function plugin(bb: BbPluginApi) {
     model: { type: "string", label: "Model override (blank = agy default)", default: "" },
     effort: {
       type: "select",
-      label: "Reasoning effort (only used when no specific model is picked — agy's own model ids already encode effort, e.g. gemini-3.5-flash-low)",
+      label: "Default reasoning effort (only used when no specific model is picked)",
       options: ["low", "medium", "high"],
       default: "medium",
     },
@@ -68,10 +68,10 @@ export default async function plugin(bb: BbPluginApi) {
       supportsThreadRename: false,
       supportsWorkflows: false,
       permissionModes: ["full"],
-      // agy's model ids already encode effort (gemini-3.5-flash-low/-medium/
-      // -high are distinct ids) — a single fixed value here keeps BB from
-      // rendering a second, redundant reasoning-effort picker per thread.
-      reasoningLevels: ["medium"],
+      // The model list is collapsed to one entry per model, so bb renders a
+      // separate reasoning-effort picker (low/medium/high); the bridge
+      // re-encodes the selection into the full agy model id at turn time.
+      reasoningLevels: ["low", "medium", "high"],
     },
     composerActions: [],
   });
