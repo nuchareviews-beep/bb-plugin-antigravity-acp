@@ -25,34 +25,62 @@ export default async function plugin(bb: BbPluginApi) {
 
   const hostClient = bb.hosts.experimental_client({ contract: antigravityHostContract });
 
-  async function primaryHostId(): Promise<string | undefined> {
-    const hosts = await bb.sdk.hosts.list();
-    return hosts[0]?.id;
-  }
-
-  async function pushConfigToHost(): Promise<void> {
+  async function pushConfigToHost(hostId: string, signal: AbortSignal): Promise<void> {
     const { agyBin, model, effort } = await settings.get();
-    const hostId = await primaryHostId();
-    if (!hostId) {
-      bb.log.warn("no enrolled host to push Antigravity config to");
-      return;
-    }
     try {
       await hostClient.call(
         "setConfig",
         { agyBin, model, effort: effort as "low" | "medium" | "high" },
-        { hostId },
+        { hostId, signal },
       );
-    } catch (err) {
-      bb.log.error(`failed to push config to host: ${err instanceof Error ? err.message : String(err)}`);
+    } catch {
+      // A disconnect can race the connected-host snapshot. The reconnect
+      // subscription below makes this retry without treating it as a load error.
     }
   }
 
-  // Host RPC calls are rejected during factory registration — defer to a
-  // timer tick (verified necessary against a live server in omniroute-acp).
-  setTimeout(() => void pushConfigToHost(), 0);
+  let requestConfigReconcile = () => {};
   settings.onChange(() => {
-    void pushConfigToHost();
+    requestConfigReconcile();
+  });
+
+  bb.background.service("host-config-reconciler", {
+    async start(signal) {
+      let reconcileRequested = true;
+      let wake: (() => void) | null = null;
+      requestConfigReconcile = () => {
+        reconcileRequested = true;
+        wake?.();
+      };
+      const unsubscribeHost = bb.sdk.subscribe({
+        event: "host:changed",
+        callback: (event) => {
+          if (event.changes.includes("host-connected")) requestConfigReconcile();
+        },
+      });
+      try {
+        while (!signal.aborted) {
+          if (reconcileRequested) {
+            reconcileRequested = false;
+            const hosts = await bb.sdk.hosts.list({ signal });
+            await Promise.all(
+              hosts
+                .filter((host) => host.status === "connected")
+                .map((host) => pushConfigToHost(host.id, signal)),
+            );
+          }
+          if (signal.aborted) break;
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          wake = null;
+        }
+      } finally {
+        requestConfigReconcile = () => {};
+        unsubscribeHost();
+      }
+    },
   });
 
   bb.providers.register({
