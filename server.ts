@@ -55,7 +55,7 @@ export default async function plugin(bb: BbPluginApi) {
     void pushConfigToHost();
   });
 
-  bb.agents.experimental_registerProvider({
+  bb.providers.register({
     id: "antigravity",
     displayName: "Antigravity",
     icon: "./assets/icon.png",
@@ -66,7 +66,6 @@ export default async function plugin(bb: BbPluginApi) {
       supportsManualCompaction: false,
       supportsThreadArchive: false,
       supportsThreadRename: false,
-      supportsWorkflows: false,
       permissionModes: ["full"],
       // The model list is collapsed to one entry per model, so bb renders a
       // separate reasoning-effort picker (low/medium/high); the bridge
