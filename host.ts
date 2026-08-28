@@ -1,8 +1,8 @@
 /**
  * bb.host artifact for the Antigravity provider. Same shape as
  * bb-plugin-omniroute-acp/host.ts (see that file for the protocol notes and
- * why config is shared through a fixed OS-temp-dir path rather than either
- * consumer's own per-process dataDir).
+ * why config is shared through a private OS-temp-dir directory rather than
+ * either consumer's own per-process dataDir).
  *
  * Unlike OmniRoute (an HTTP proxy), Antigravity is a local CLI (`agy`) with
  * its own OAuth state — the bridge shells out to it per turn rather than
@@ -38,7 +38,7 @@ import {
   experimental_defineProviderBridge,
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile, spawn } from "node:child_process";
@@ -74,13 +74,27 @@ function runAgyNoStdin(bin: string, args: string[], timeoutMs: number): Promise<
   });
 }
 
-const configPath = join(tmpdir(), "bb-plugin-antigravity-acp-config.json");
+const configDir = join(tmpdir(), "bb-plugin-antigravity-acp");
+const configPath = join(configDir, "config.json");
+const legacyConfigPath = join(tmpdir(), "bb-plugin-antigravity-acp-config.json");
+
+function writeConfig(input: object): void {
+  mkdirSync(configDir, { recursive: true, mode: 0o700 });
+  chmodSync(configDir, 0o700);
+  writeFileSync(configPath, JSON.stringify(input), { encoding: "utf8", mode: 0o600 });
+  chmodSync(configPath, 0o600);
+  try {
+    unlinkSync(legacyConfigPath);
+  } catch {
+    // The legacy file is absent after the first successful migration.
+  }
+}
 
 export default experimental_defineHostEntry({
   contract: antigravityHostContract,
   handlers: {
     setConfig: (input) => {
-      writeFileSync(configPath, JSON.stringify(input));
+      writeConfig(input);
       return { ok: true as const };
     },
   },
