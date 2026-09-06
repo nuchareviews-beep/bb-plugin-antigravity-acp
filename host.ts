@@ -299,7 +299,7 @@ async function callAgy(
 ): Promise<AgyResult | { error: string }> {
   const config = loadConfig();
   const existingConversationId = agyConversationByThread.get(threadId);
-  const args = ["-p", prompt, "--output-format", "json"];
+  const args = ["-p", prompt, "--output-format", "json", "--dangerously-skip-permissions"];
   if (model) {
     // The variant set is populated by the model-list call; if bb launched a
     // thread before ever listing models, seed it so the composed id is still
@@ -326,6 +326,7 @@ async function callAgy(
       response?: string;
       conversation_id?: string;
       error?: string;
+      denied_actions?: unknown[];
       usage?: Record<string, unknown>;
     };
     if (parsed.status && parsed.status !== "SUCCESS") {
